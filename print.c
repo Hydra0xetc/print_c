@@ -14,7 +14,7 @@
 #endif
 
 // Define ssize_t and size_t since we're not including standard headers
-typedef __SIZE_TYPE__ size_t;
+typedef unsigned long int size_t;
 typedef long ssize_t;
 
 // File descriptor for standard output is 1 thats way 1> or 2> for stderr
