@@ -25,8 +25,10 @@ typedef long ssize_t;
 
 // System call number for write() on ARM64 Linux
 // You can find this in: /usr/include/asm-generic/unistd.h
-// or check with: grep "__NR_write" /usr/include/asm*/unistd.h
+// or check with: grep "__NR_write" /usr/include/asm-generic/unistd.h
 #define __NR_write 64
+// syscall for exit can also found in asm*/unistd.h
+#define __NR_exit 93
 
 // Exit status codes
 #define EXIT_FAILURE 1
@@ -59,6 +61,27 @@ static inline ssize_t write(int fd, const void *buf, ssize_t count) {
     );
 
     return x0; // Return value from system call (negative for error)
+}
+
+// https://stackoverflow.com/questions/70683911/why-when-would-should-you-use-attribute-noreturn
+__attribute__((noreturn)) static inline void exit(int exit_code) {
+    register long x0 asm("x0") = exit_code;
+    register long x8 asm("x8") = __NR_exit;
+
+    asm volatile( //
+        "svc 0"   // Make supervisor call (system call)
+        :         // empty, because not return anyting
+        : "r"(x0), "r"(x8)
+        : "memory"
+
+    );
+
+    // trigger ilegall instruction if syscall fail
+    // NOTE: I could think of a better way to notify if a syscall fails,
+    // so i do this
+    asm volatile(".inst 0x000000");
+
+    __builtin_unreachable();
 }
 
 /*
@@ -96,7 +119,11 @@ ssize_t print(const char *format, ...) {
     return (ret < 0) ? -1 : ret;
 }
 
-int main(void) {
-    print("Hello World\n");
-    return EXIT_SUCCESS;
+// main() make the program linking into libc so i use _start()
+// see: https://wiki.osdev.org/Implications_of_writing_a_freestanding_C_project
+void _start(void) {
+    for (size_t i = 0; i < 10; i++) {
+        print("Hello World\n");
+    }
+    exit(EXIT_SUCCESS);
 }
