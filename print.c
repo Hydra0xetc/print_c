@@ -20,7 +20,7 @@ typedef long ssize_t;
 // File descriptor for standard output is 1 thats way 1> or 2> for stderr
 // see: https://en.wikipedia.org/wiki/Standard_streams
 // for more information
-// NOTE: stdin is 0, stdout is 2, stderr is 3
+// NOTE: stdin is 0, stdout is 1, stderr is 2
 #define STDOUT_FILENO 1
 
 // System call number for write() on ARM64 Linux
