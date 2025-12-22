@@ -1,6 +1,6 @@
 CC = gcc
 SRC = print.c
-FLAGS = -Wall -Wextra -ggdb
+FLAGS = -Wall -Wextra -ggdb -nostdlib -ffreestanding
 OUT = bin/out
 
 .PHONY = all build clean
