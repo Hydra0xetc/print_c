@@ -13,7 +13,6 @@ $(OUT): $(SRC)
 	$(CC) $(SRC) $(FLAGS) -o $(OUT)
 
 run: build
-	@echo "Running the prrogram"
 	@./bin/out
 
 clean:

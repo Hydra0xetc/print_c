@@ -13,8 +13,9 @@
 #error "This code is only work in linux aarch64 LP64 (including Android)"
 #endif
 
-// Define size_t since we're not including standard headers
+// Define ssize_t and size_t since we're not including standard headers
 typedef __SIZE_TYPE__ size_t;
+typedef long ssize_t;
 
 // File descriptor for standard output is 1 thats way 1> or 2> for stderr
 // see: https://en.wikipedia.org/wiki/Standard_streams
@@ -41,7 +42,7 @@ typedef __SIZE_TYPE__ size_t;
  * - svc 0: supervisor call (like int 0x80 on x86)
  * Return value is in x0
  */
-static inline int write(int fd, const void *buf, size_t count) {
+static inline ssize_t write(int fd, const void *buf, ssize_t count) {
 
     // Load arguments into registers following ARM64 calling convention
     register long x0 asm("x0") = fd;         // File descriptor
@@ -82,13 +83,14 @@ size_t strlen(const char *s) {
  * NOTE: This is a very basic version that only prints strings
  * A full printf() would need to handle format specifiers like %d, %s, etc.
  */
-long print(const char *format, ...) {
+
+ssize_t print(const char *format, ...) {
 
     // For now, ignore variadic arguments (...) - this just prints the string
     // In a real implementation, you'd parse the format string here
 
     // Call write() system call
-    long ret = write(STDOUT_FILENO, format, strlen(format));
+    ssize_t ret = write(STDOUT_FILENO, format, strlen(format));
 
     // Return negative value on error, number of bytes written on success
     return (ret < 0) ? -1 : ret;
