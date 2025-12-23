@@ -1,5 +1,5 @@
 CC = gcc
-SRC = print.c
+SRC = printf.c
 FLAGS = -Wall -Wextra -ggdb -nostdlib -ffreestanding
 OUT = bin/out
 
