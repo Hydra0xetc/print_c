@@ -1,4 +1,4 @@
-// print without any header or library only work in linux aarch64
+// printf without any header or library only work in linux aarch64
 
 /*
  * Conditional compilation: Ensures this code only runs on Linux aarch64 LP64
@@ -17,16 +17,25 @@
 typedef unsigned long int size_t;
 typedef long ssize_t;
 
+// define va_list
+typedef __builtin_va_list va_list;
+
+#define va_start(ap, last) __builtin_va_start(ap, last)
+#define va_arg(ap, type)   __builtin_va_arg(ap, type)
+#define va_end(last)       __builtin_va_end(last)
+
 // File descriptor for standard output is 1 thats way 1> or 2> for stderr
 // see: https://en.wikipedia.org/wiki/Standard_streams
 // for more information
 // NOTE: stdin is 0, stdout is 1, stderr is 2
+#define STDIN_FILENO  0
 #define STDOUT_FILENO 1
 
 // System call number for write() on ARM64 Linux
 // You can find this in: /usr/include/asm-generic/unistd.h
 // or check with: grep "__NR_write" /usr/include/asm-generic/unistd.h
 #define __NR_write 64
+#define __NR_read  63
 // syscall for exit can also found in asm*/unistd.h
 #define __NR_exit 93
 
@@ -51,6 +60,25 @@ static inline ssize_t write(int fd, const void *buf, ssize_t count) {
     register long x1 asm("x1") = (long)buf;  // Buffer address
     register long x2 asm("x2") = count;      // Number of bytes to write
     register long x8 asm("x8") = __NR_write; // System call number
+
+    // Inline assembly for system call
+    asm volatile(
+        "svc 0"    // Make supervisor call (system call)
+        : "+r"(x0) // Output: x0 (return value) is both input and output
+        : "r"(x1), "r"(x2), "r"(x8) // Input: x1, x2, x8 registers
+        : "memory"                  // Clobber: memory may be modified
+    );
+
+    return x0; // Return value from system call (negative for error)
+}
+
+static inline ssize_t read(int fd, void *buf, size_t count) {
+
+    // Load arguments into registers following ARM64 calling convention
+    register long x0 asm("x0") = fd;        // File descriptor
+    register long x1 asm("x1") = (long)buf; // Buffer address
+    register long x2 asm("x2") = count;     // Number of bytes to write
+    register long x8 asm("x8") = __NR_read; // System call number
 
     // Inline assembly for system call
     asm volatile(
@@ -102,28 +130,66 @@ size_t strlen(const char *s) {
 }
 
 /*
- * Simplified print() function
+ * Simplified printf() function
  * NOTE: This is a very basic version that only prints strings
  * A full printf() would need to handle format specifiers like %d, %s, etc.
  */
 
-ssize_t print(const char *format, ...) {
+ssize_t printf(const char *format, ...) {
+    // just use va_list like a normal va_list
+    va_list ap;
 
-    // For now, ignore variadic arguments (...) - this just prints the string
-    // In a real implementation, you'd parse the format string here
+    va_start(ap, format);
 
-    // Call write() system call
-    ssize_t ret = write(STDOUT_FILENO, format, strlen(format));
+    const char *p = format;
+    ssize_t total = 0;
 
-    // Return negative value on error, number of bytes written on success
-    return (ret < 0) ? -1 : ret;
+    while (*p) {
+        // NOTE: just implement %s not all format
+        if (*p == '%' && *(p + 1) == 's') {
+            p += 2;
+
+            const char *s = va_arg(ap, const char *);
+            if (s) {
+                ssize_t len = strlen(s);
+                write(STDOUT_FILENO, s, len);
+                total += len;
+            }
+        } else {
+            write(STDOUT_FILENO, p, 1);
+            total += 1;
+            p++;
+        }
+    }
+
+    va_end(ap);
+    return total;
 }
 
 // main() make the program linking into libc so i use _start()
 // see: https://wiki.osdev.org/Implications_of_writing_a_freestanding_C_project
 void _start(void) {
-    for (size_t i = 0; i < 10; i++) {
-        print("Hello World\n");
+
+    char buffer[1024];
+
+    while (1) {
+
+        printf("Input something: ");
+        ssize_t len = read(STDIN_FILENO, buffer, sizeof(buffer));
+
+        if (!len) { // Handle EOF
+            exit(EXIT_FAILURE);
+        }
+
+        buffer[len - 1] = '\0'; // delete newline
+
+        if (len > 1) {
+            printf("Your input is '%s'\n", buffer);
+            break;
+        }
+
+        printf("Please input something!!\n");
     }
+
     exit(EXIT_SUCCESS);
 }
