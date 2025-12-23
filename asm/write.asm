@@ -26,7 +26,7 @@ write:
 
 _start:
     adr x1, msg1
-    mov x2, #12     // TODO: I think a good think if i can implement strlen
+    mov x2, #12     // TODO: I think a good thing if i can implement strlen
     bl write
     
     adr x1, msg2
