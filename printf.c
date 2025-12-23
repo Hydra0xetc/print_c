@@ -94,6 +94,7 @@ static inline ssize_t read(int fd, void *buf, size_t count) {
     return x0; // Return value from system call (negative for error)
 }
 
+// About __attribute__((noreturn)) see:
 // https://stackoverflow.com/questions/70683911/why-when-would-should-you-use-attribute-noreturn
 __attribute__((noreturn)) static inline void exit(int exit_code) {
     register long x0 asm("x0") = exit_code;
@@ -144,24 +145,32 @@ ssize_t printf(const char *format, ...) {
 
     va_start(ap, format);
 
-    const char *p = format;
     ssize_t total = 0;
 
-    while (*p) {
+    while (*format) {
         // NOTE: just implement %s not all format
-        if (*p == '%' && *(p + 1) == 's') {
-            p += 2;
+        if (*format == '%' && *(format + 1) == 's') {
+            format += 2;
 
-            const char *s = va_arg(ap, const char *);
+            const char *s = va_arg(ap, char *);
             if (s) {
                 ssize_t len = strlen(s);
-                write(STDOUT_FILENO, s, len);
+                ssize_t written = write(STDOUT_FILENO, s, len);
+                // On write error, abort program
+                if (written < 0) {
+                    va_end(ap);
+                    exit(EXIT_FAILURE);
+                }
                 total += len;
             }
         } else {
-            write(STDOUT_FILENO, p, 1);
+            ssize_t written = write(STDOUT_FILENO, format, 1);
+            if (written < 0) {
+                va_end(ap);
+                exit(EXIT_FAILURE);
+            }
             total += 1;
-            p++;
+            format++;
         }
     }
 
@@ -181,11 +190,19 @@ void _start(void) {
         printf("Input something: ");
         ssize_t len = read(STDIN_FILENO, buffer, sizeof(buffer));
 
-        if (!len) { // Handle EOF
+        if (len <= 0) { // Handle EOF
             exit(EXIT_FAILURE);
         }
+        // delete new line
+        if (len > 0 && buffer[len - 1] == '\n') {
+            buffer[len - 1] = '\0';
 
-        buffer[len - 1] = '\0'; // delete newline
+        } else if ((size_t)len >= sizeof(buffer)) {
+            buffer[sizeof(buffer) - 1] = '\0';
+
+        } else {
+            buffer[len] = '\0';
+        }
 
         if (len > 1) {
             printf("Your input is '%s'\n", buffer);
