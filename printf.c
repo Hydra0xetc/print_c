@@ -53,7 +53,7 @@ typedef __builtin_va_list va_list;
  * - svc 0: supervisor call (like int 0x80 on x86)
  * Return value is in x0
  */
-static inline ssize_t write(int fd, const void *buf, ssize_t count) {
+static inline ssize_t write(int fd, const void *buf, size_t count) {
 
     // Load arguments into registers following ARM64 calling convention
     register long x0 asm("x0") = fd;         // File descriptor
@@ -71,6 +71,9 @@ static inline ssize_t write(int fd, const void *buf, ssize_t count) {
 
     return x0; // Return value from system call (negative for error)
 }
+
+// About svc see:
+// https://s-o-c.org/arm-svc-instruction-example/#what-is-the-svc-instruction
 
 static inline ssize_t read(int fd, void *buf, size_t count) {
 
@@ -118,15 +121,15 @@ __attribute__((noreturn)) static inline void exit(int exit_code) {
  * Returns the length of a null-terminated string
  */
 size_t strlen(const char *s) {
-    const char *p = s; // Start at beginning of string
+    const char *format = s; // Start at beginning of string
 
     // Loop until we find null terminator
-    while (*p != '\0') {
-        p++;
+    while (*format != '\0') {
+        format++;
     }
 
     // Calculate length: end pointer minus start pointer
-    return (size_t)(p - s);
+    return (size_t)(format - s);
 }
 
 /*
@@ -170,8 +173,9 @@ ssize_t printf(const char *format, ...) {
 // see: https://wiki.osdev.org/Implications_of_writing_a_freestanding_C_project
 void _start(void) {
 
-    char buffer[1024];
+    printf("Hello World\n");
 
+    char buffer[1024];
     while (1) {
 
         printf("Input something: ");
