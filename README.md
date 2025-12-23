@@ -1,4 +1,4 @@
-# Implemented print a string in c without any library or header
+# Implemented print a string in c and asm without any library or header
 
 > [!WARNING]
 > this only work on linux aarch64 because the asm specifically for that.
