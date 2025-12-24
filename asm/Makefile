@@ -1,5 +1,6 @@
 CC = as
 LD = ld
+AS_FLAGS = -g
 SRC = write.asm
 OBJ = bin/out.o
 OUT = bin/out
@@ -11,13 +12,13 @@ all: build
 build: $(OBJ) $(OUT)
 
 $(OBJ): $(SRC)
-	$(CC) $(SRC) -o $(OBJ)
+	$(CC) $(SRC) $(AS_FLAGS) -o $(OBJ)
 
 $(OUT): $(OBJ)
 	$(LD) $(OBJ) -o $(OUT)
 
 run: build
-	@./bin/out
+	./bin/out
 
 clean:
 	@echo "Cleaning..."

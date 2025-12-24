@@ -3,6 +3,18 @@
 .global _start
 .section .text
 
+strlen:
+    mov x0, #0
+    mov x3, x1
+.loop:
+    ldrb w2, [x3]
+    cbz w2, .done
+    add x3, x3, #1
+    add x0, x0, #1
+    b .loop
+.done:
+    ret
+
 exit_success:
     // exit(0)
     mov x0, #0      // exit 0 for success
@@ -25,23 +37,38 @@ write:
     ret             // return x0
 
 _start:
+    ////////////////////////////////// 
+    // msg1
     adr x1, msg1
-    mov x2, #12     // TODO: I think a good thing if i can implement strlen
-    bl write
-    
-    adr x1, msg2
-    mov x2, #16
+    bl strlen
+    mov x2, x0
+    adr x1, msg1
     bl write
 
-    cmp x0, #0      // if (x0 != 0) return 1;
+    cmp x0, #0      // if (x0 != 0) exit(1);
+    blt exit_failure 
+    // end of msg1
+    ////////////////////////////////// 
+    
+    ////////////////////////////////// 
+    // msg2
+    adr x1, msg2
+    bl strlen
+    mov x2, x0
+    adr x1, msg2
+    bl write
+    
+    cmp x0, #0
     blt exit_failure
+    // end of msg2
+    //////////////////////////////////
 
     b exit_success
 
 .section .rodata
 
 msg1:
-    .ascii "Hello World\n"
+    .asciz "Hello World\n" // asciz make the string have null terminator
 
 msg2:
-    .ascii "Hello Everybody\n"
+    .asciz "Hello Everybody\n"
