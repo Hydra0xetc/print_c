@@ -44,7 +44,6 @@ typedef __builtin_va_list va_list;
 #define EXIT_SUCCESS 0
 
 /*
- * Inline assembly implementation of write() system call
  * System call convention for ARM64:
  * - x0: first argument (file descriptor)
  * - x1: second argument (buffer pointer)
@@ -53,13 +52,13 @@ typedef __builtin_va_list va_list;
  * - svc 0: supervisor call (like int 0x80 on x86)
  * Return value is in x0
  */
-static inline ssize_t write(int fd, const void *buf, size_t count) {
-
+static inline ssize_t
+syscall(int fd, long syscall_number, ssize_t buf, size_t count) {
     // Load arguments into registers following ARM64 calling convention
-    register long x0 asm("x0") = fd;         // File descriptor
-    register long x1 asm("x1") = (long)buf;  // Buffer address
-    register long x2 asm("x2") = count;      // Number of bytes to write
-    register long x8 asm("x8") = __NR_write; // System call number
+    register long x0 asm("x0") = fd;             // File descriptor
+    register long x1 asm("x1") = buf;            // Buffer address
+    register long x2 asm("x2") = count;          // Number of bytes to write
+    register long x8 asm("x8") = syscall_number; // System call number
 
     // Inline assembly for system call
     asm volatile(
@@ -68,30 +67,19 @@ static inline ssize_t write(int fd, const void *buf, size_t count) {
         : "r"(x1), "r"(x2), "r"(x8) // Input: x1, x2, x8 registers
         : "memory"                  // Clobber: memory may be modified
     );
+
+    // About svc see:
+    // https://s-o-c.org/arm-svc-instruction-example/#what-is-the-svc-instruction
 
     return x0; // Return value from system call (negative for error)
 }
 
-// About svc see:
-// https://s-o-c.org/arm-svc-instruction-example/#what-is-the-svc-instruction
+static ssize_t write(int fd, const void *buf, size_t count) {
+    return syscall(fd, __NR_write, (long)buf, count);
+}
 
 static inline ssize_t read(int fd, void *buf, size_t count) {
-
-    // Load arguments into registers following ARM64 calling convention
-    register long x0 asm("x0") = fd;        // File descriptor
-    register long x1 asm("x1") = (long)buf; // Buffer address
-    register long x2 asm("x2") = count;     // Number of bytes to write
-    register long x8 asm("x8") = __NR_read; // System call number
-
-    // Inline assembly for system call
-    asm volatile(
-        "svc 0"    // Make supervisor call (system call)
-        : "+r"(x0) // Output: x0 (return value) is both input and output
-        : "r"(x1), "r"(x2), "r"(x8) // Input: x1, x2, x8 registers
-        : "memory"                  // Clobber: memory may be modified
-    );
-
-    return x0; // Return value from system call (negative for error)
+    return syscall(fd, __NR_read, (long)buf, count);
 }
 
 // About __attribute__((noreturn)) see:
@@ -108,12 +96,10 @@ __attribute__((noreturn)) static inline void exit(int exit_code) {
 
     );
 
-    // trigger ilegall instruction if syscall fail
-    // NOTE: I could think of a better way to notify if a syscall fails,
-    // so i do this
-    asm volatile(".inst 0x000000");
-
-    __builtin_unreachable();
+    // trigger trap instruction if syscall fail
+    __builtin_trap();
+    // see:
+    // https://developer.arm.com/documentation/107976/20-1-0/Clang-reference/clang-built-in-functions/--builtin-trap
 }
 
 /*
