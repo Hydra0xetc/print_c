@@ -1,4 +1,4 @@
-CC = gcc
+CC = aarch64-linux-android-gcc
 SRC = printf.c
 FLAGS = -Wall -Wextra -ggdb -nostdlib -ffreestanding
 OUT = bin/out
@@ -13,7 +13,7 @@ $(OUT): $(SRC)
 	$(CC) $(SRC) $(FLAGS) -o $(OUT)
 
 run: build
-	@./bin/out
+	@./$(OUT)
 
 clean:
 	@echo "Cleaning..."

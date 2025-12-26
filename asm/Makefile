@@ -18,7 +18,7 @@ $(OUT): $(OBJ)
 	$(LD) $(OBJ) -o $(OUT)
 
 run: build
-	./bin/out
+	@./$(OUT)
 
 clean:
 	@echo "Cleaning..."
