@@ -164,9 +164,11 @@ ssize_t printf(const char *format, ...) {
     return total;
 }
 
-// main() make the program linking into libc so i use _start()
-// see: https://wiki.osdev.org/Implications_of_writing_a_freestanding_C_project
-void _start(void) {
+int main(int argc, char **argv) {
+
+    for (int i = 1; i < argc; i++) {
+        printf("%s\n", argv[i]);
+    }
 
     printf("Hello World\n");
 
@@ -198,5 +200,21 @@ void _start(void) {
         printf("Please input something!!\n");
     }
 
-    exit(EXIT_SUCCESS);
+    return 0;
+}
+
+// setup stack
+void entry0(long *stack) {
+    int argc = (int)stack[0];
+    char **argv = (char **)(stack + 1);
+    int ret = main(argc, argv);
+    exit(ret);
+}
+
+__attribute__((naked, noreturn)) void _start(void) {
+    asm(                   //
+        "    mov x0, sp\n" // sp = stack
+        "    bl entry0\n"
+
+    );
 }
