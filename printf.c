@@ -36,7 +36,7 @@ typedef __builtin_va_list va_list;
 // or check with: grep "__NR_write" /usr/include/asm-generic/unistd.h
 #define __NR_write 64
 #define __NR_read  63
-// syscall for exit can also found in asm*/unistd.h
+// syscall for exit can also found in asm-generic/unistd.h
 #define __NR_exit 93
 
 // Exit status codes
@@ -125,6 +125,7 @@ size_t strlen(const char *s) {
  * A full printf() would need to handle format specifiers like %d, %s, etc.
  */
 
+__attribute__((format(printf, 1, 2))) //
 ssize_t printf(const char *format, ...) {
     // just use va_list like a normal va_list
     va_list ap;
@@ -179,8 +180,9 @@ int main(int argc, char **argv) {
         ssize_t len = read(STDIN_FILENO, buffer, sizeof(buffer));
 
         if (len <= 0) { // Handle EOF
-            exit(EXIT_FAILURE);
+            return EXIT_FAILURE;
         }
+
         // delete new line
         if (len > 0 && buffer[len - 1] == '\n') {
             buffer[len - 1] = '\0';
@@ -200,13 +202,14 @@ int main(int argc, char **argv) {
         printf("Please input something!!\n");
     }
 
-    return 0;
+    return EXIT_SUCCESS;
 }
 
 // setup stack
 void entry0(long *stack) {
     int argc = (int)stack[0];
     char **argv = (char **)(stack + 1);
+    // char **envp = argv + argc + 1;
     int ret = main(argc, argv);
     exit(ret);
 }
