@@ -206,7 +206,7 @@ int main(int argc, char **argv) {
 }
 
 // setup stack
-void entry0(long *stack) {
+void _start_main(long *stack) {
     int argc = (int)stack[0];
     char **argv = (char **)(stack + 1);
     // char **envp = argv + argc + 1;
