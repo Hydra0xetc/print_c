@@ -217,7 +217,7 @@ void _start_main(long *stack) {
 __attribute__((naked, noreturn)) void _start(void) {
     asm(                   //
         "    mov x0, sp\n" // sp = stack
-        "    bl entry0\n"
+        "    bl _start_main\n"
 
     );
 }
