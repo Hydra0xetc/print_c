@@ -84,6 +84,8 @@ static inline ssize_t read(int fd, void *buf, size_t count) {
 
 // About __attribute__((noreturn)) see:
 // https://stackoverflow.com/questions/70683911/why-when-would-should-you-use-attribute-noreturn
+// About __attribute__ see:
+// https://gcc.gnu.org/onlinedocs/gcc-4.7.2/gcc/Function-Attributes.html
 __attribute__((noreturn)) static inline void exit(int exit_code) {
     register long x0 asm("x0") = exit_code;
     register long x8 asm("x8") = __NR_exit;
@@ -215,7 +217,7 @@ void _start_main(long *stack) {
 }
 
 __attribute__((naked, noreturn)) void _start(void) {
-    asm(                   //
+    asm(
         "    mov x0, sp\n" // sp = stack
         "    bl _start_main\n"
 
