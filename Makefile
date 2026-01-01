@@ -1,7 +1,7 @@
-CC = aarch64-linux-android-gcc
-SRC = printf.c
+CC    = aarch64-linux-android-gcc
+SRC   = printf.c
 FLAGS = -Wall -Wextra -ggdb -nostdlib -ffreestanding
-OUT = bin/out
+OUT   = bin/out
 
 .PHONY = all build clean
 

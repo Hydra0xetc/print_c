@@ -1,9 +1,9 @@
-CC = as
-LD = ld
+CC       = as
+LD       = aarch64-linux-android-ld
 AS_FLAGS = -g
-SRC = write.asm
-OBJ = bin/out.o
-OUT = bin/out
+SRC      = write.asm
+OBJ      = bin/out.o
+OUT      = bin/out
 
 .PHONY = all build clean
 
