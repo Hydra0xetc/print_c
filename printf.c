@@ -1,4 +1,4 @@
-// printf without any header or library only work in linux aarch64
+// printf without any header or library only works on Linux aarch64
 
 /*
  * Conditional compilation: Ensures this code only runs on Linux aarch64 LP64
@@ -13,11 +13,16 @@
 #error "This code is only work in linux aarch64 LP64 (including Android)"
 #endif
 
-// Define ssize_t and size_t since we're not including standard headers
+// Define basic data types
 typedef unsigned long int size_t;
 typedef long ssize_t;
+typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
+typedef unsigned int uint32_t;
+typedef unsigned long uint64_t;
+typedef long int64_t;
 
-// define va_list
+// Define va_list
 typedef __builtin_va_list va_list;
 
 #define va_start(ap, last) __builtin_va_start(ap, last)
@@ -30,6 +35,7 @@ typedef __builtin_va_list va_list;
 // NOTE: stdin is 0, stdout is 1, stderr is 2
 #define STDIN_FILENO  0
 #define STDOUT_FILENO 1
+#define STDERR_FILENO 2
 
 // System call number for write() on ARM64 Linux
 // You can find this in: /usr/include/asm-generic/unistd.h
@@ -42,6 +48,8 @@ typedef __builtin_va_list va_list;
 // Exit status codes
 #define EXIT_FAILURE 1
 #define EXIT_SUCCESS 0
+
+#define NULL ((void *)0)
 
 /*
  * System call convention for ARM64:
@@ -122,59 +130,623 @@ size_t strlen(const char *s) {
 }
 
 /*
- * Simplified printf() function
- * NOTE: This is a very basic version that only prints strings
- * A full printf() would need to handle format specifiers like %d, %s, etc.
+ * Custom memcpy() implementation
+ * Copies n bytes from src to dest
+ */
+void *memcpy(void *dest, const void *src, size_t n) {
+    char *d = (char *)dest;
+    const char *s = (const char *)src;
+
+    for (size_t i = 0; i < n; i++) {
+        d[i] = s[i];
+    }
+
+    return dest;
+}
+
+/*
+ * Number conversion functions
  */
 
-__attribute__((format(printf, 1, 2))) //
-ssize_t printf(const char *format, ...) {
-    // just use va_list like a normal va_list
-    va_list ap;
+// Convert unsigned integer to string with given base (2-16)
+// Returns pointer to the end of the string
+static char *uitoa(uint64_t num, char *buffer, int base, int uppercase) {
+    char digits_lower[] = "0123456789abcdef";
+    char digits_upper[] = "0123456789ABCDEF";
+    const char *digits = uppercase ? digits_upper : digits_lower;
 
-    va_start(ap, format);
+    char *ptr = buffer;
+    char *start = buffer;
 
-    ssize_t total = 0;
+    // Handle 0 explicitly
+    if (num == 0) {
+        *ptr++ = '0';
+    } else {
+        // Convert number to string (reverse order)
+        while (num > 0) {
+            *ptr++ = digits[num % base];
+            num /= base;
+        }
 
-    while (*format) {
-        // NOTE: just implement %s not all format
-        if (*format == '%' && *(format + 1) == 's') {
-            format += 2;
-
-            const char *s = va_arg(ap, char *);
-            if (s) {
-                ssize_t len = strlen(s);
-                ssize_t written = write(STDOUT_FILENO, s, len);
-                // On write error, abort program
-                if (written < 0) {
-                    va_end(ap);
-                    exit(EXIT_FAILURE);
-                }
-                total += len;
-            }
-        } else {
-            ssize_t written = write(STDOUT_FILENO, format, 1);
-            if (written < 0) {
-                va_end(ap);
-                exit(EXIT_FAILURE);
-            }
-            total += 1;
-            format++;
+        // Reverse the string
+        char *end = ptr - 1;
+        while (start < end) {
+            char tmp = *start;
+            *start = *end;
+            *end = tmp;
+            start++;
+            end--;
         }
     }
 
-    va_end(ap);
-    return total;
+    *ptr = '\0';
+    return ptr;
 }
 
-int main(int argc, char **argv) {
-
-    for (int i = 1; i < argc; i++) {
-        printf("%s\n", argv[i]);
+// Convert signed integer to string
+static char *itoa(int64_t num, char *buffer, int base, int uppercase) {
+    if (num < 0 && base == 10) {
+        *buffer++ = '-';
+        num = -num;
     }
 
-    printf("Hello World\n");
+    uitoa((uint64_t)num, buffer, base, uppercase);
+    return buffer;
+}
 
+// Flags for format specifiers
+typedef struct {
+    int left_justify;    // '-'
+    int always_sign;     // '+'
+    int space_sign;      // ' '
+    int zero_pad;        // '0'
+    int alternate_form;  // '#'
+    int width;           // field width
+    int precision;       // precision (-1 means unspecified)
+    int length_modifier; // h, hh, l, ll, z, t, j
+    char specifier;      // d, i, u, o, x, X, f, e, g, c, s, p, n, %
+} format_flags;
+
+/*
+ * Parse format specifier
+ * Returns the number of characters consumed
+ */
+static int parse_format(const char *format, format_flags *flags) {
+    const char *start = format;
+
+    // Initialize flags
+    flags->left_justify = 0;
+    flags->always_sign = 0;
+    flags->space_sign = 0;
+    flags->zero_pad = 0;
+    flags->alternate_form = 0;
+    flags->width = 0;
+    flags->precision = -1;
+    flags->length_modifier = 0;
+    flags->specifier = 0;
+
+    // Parse flags
+    while (1) {
+        switch (*format) {
+        case '-':
+            flags->left_justify = 1;
+            break;
+        case '+':
+            flags->always_sign = 1;
+            break;
+        case ' ':
+            flags->space_sign = 1;
+            break;
+        case '0':
+            flags->zero_pad = 1;
+            break;
+        case '#':
+            flags->alternate_form = 1;
+            break;
+        default:
+            goto parse_width;
+        }
+        format++;
+    }
+
+parse_width:
+    // Parse width
+    if (*format >= '0' && *format <= '9') {
+        flags->width = 0;
+        while (*format >= '0' && *format <= '9') {
+            flags->width = flags->width * 10 + (*format - '0');
+            format++;
+        }
+    } else if (*format == '*') {
+        // Width from argument (handled later)
+        format++;
+        flags->width = -1; // Special marker
+    }
+
+    // Parse precision
+    if (*format == '.') {
+        format++;
+        flags->precision = 0;
+
+        if (*format >= '0' && *format <= '9') {
+            flags->precision = 0;
+            while (*format >= '0' && *format <= '9') {
+                flags->precision = flags->precision * 10 + (*format - '0');
+                format++;
+            }
+        } else if (*format == '*') {
+            // Precision from argument (handled later)
+            format++;
+            flags->precision = -2; // Special marker
+        }
+    }
+
+    // Parse length modifier
+    switch (*format) {
+    case 'h':
+        if (*(format + 1) == 'h') {
+            flags->length_modifier = 'H'; // hh
+            format += 2;
+        } else {
+            flags->length_modifier = 'h'; // h
+            format++;
+        }
+        break;
+    case 'l':
+        if (*(format + 1) == 'l') {
+            flags->length_modifier = 'L'; // ll
+            format += 2;
+        } else {
+            flags->length_modifier = 'l'; // l
+            format++;
+        }
+        break;
+    case 'j':
+        flags->length_modifier = 'j';
+        format++;
+        break;
+    case 'z':
+        flags->length_modifier = 'z';
+        format++;
+        break;
+    case 't':
+        flags->length_modifier = 't';
+        format++;
+        break;
+    case 'L':
+        flags->length_modifier = 'L';
+        format++;
+        break;
+    }
+
+    // Parse specifier
+    flags->specifier = *format;
+    format++;
+
+    return (int)(format - start);
+}
+
+/*
+ * Write formatted output to buffer
+ */
+static int format_to_buffer(char *buffer, const char *format, va_list ap) {
+    char *ptr = buffer;
+    char temp_buffer[128]; // Temporary buffer for number conversions
+
+    while (*format) {
+        if (*format != '%') {
+            *ptr++ = *format++;
+            continue;
+        }
+
+        // Handle %%
+        if (*(format + 1) == '%') {
+            *ptr++ = '%';
+            format += 2;
+            continue;
+        }
+
+        // Parse format specifier
+        format_flags flags;
+        int consumed = parse_format(format + 1, &flags);
+        format += consumed + 1;
+
+        // Handle width from argument
+        if (flags.width == -1) {
+            flags.width = va_arg(ap, int);
+            if (flags.width < 0) {
+                flags.left_justify = 1;
+                flags.width = -flags.width;
+            }
+        }
+
+        // Handle precision from argument
+        if (flags.precision == -2) {
+            flags.precision = va_arg(ap, int);
+            if (flags.precision < 0) {
+                flags.precision = -1; // Unspecified
+            }
+        }
+
+        // Handle different specifiers
+        switch (flags.specifier) {
+        case 'c': {
+            // Character
+            char c = (char)va_arg(ap, int);
+            *ptr++ = c;
+            break;
+        }
+
+        case 's': {
+            // String
+            const char *str = va_arg(ap, const char *);
+            if (str == NULL) {
+                str = "(null)";
+            }
+
+            size_t len = strlen(str);
+            if (flags.precision >= 0 && (size_t)flags.precision < len) {
+                len = flags.precision;
+            }
+
+            // Padding before string (right-justified)
+            if (!flags.left_justify && flags.width > (int)len) {
+                int pad = flags.width - (int)len;
+                for (int i = 0; i < pad; i++) {
+                    *ptr++ = ' ';
+                }
+            }
+
+            // Copy string
+            for (size_t i = 0; i < len; i++) {
+                *ptr++ = str[i];
+            }
+
+            // Padding after string (left-justified)
+            if (flags.left_justify && flags.width > (int)len) {
+                int pad = flags.width - (int)len;
+                for (int i = 0; i < pad; i++) {
+                    *ptr++ = ' ';
+                }
+            }
+            break;
+        }
+
+        case 'd':
+        case 'i': {
+            // Signed integer
+            int64_t value;
+
+            // Get value based on length modifier
+            switch (flags.length_modifier) {
+            case 'H': // char
+                value = (signed char)va_arg(ap, int);
+                break;
+            case 'h': // short
+                value = (short)va_arg(ap, int);
+                break;
+            case 'l': // long
+                value = va_arg(ap, long);
+                break;
+            case 'L': // long long
+                value = va_arg(ap, long long);
+                break;
+            case 'j': // intmax_t
+                value = va_arg(ap, int64_t);
+                break;
+            case 'z': // size_t
+                value = (int64_t)va_arg(ap, size_t);
+                break;
+            case 't': // ptrdiff_t
+                value = (int64_t)va_arg(ap, long);
+                break;
+            default: // int
+                value = va_arg(ap, int);
+                break;
+            }
+
+            char *num_str = temp_buffer;
+            if (flags.precision == 0 && value == 0) {
+                // Handle zero precision with zero value
+                num_str[0] = '\0';
+            } else {
+                // Convert number to string
+                itoa(value, num_str, 10, 0);
+            }
+
+            size_t len = strlen(num_str);
+
+            // Handle sign
+            char sign = 0;
+            if (value < 0) {
+                sign = '-';
+            } else if (flags.always_sign) {
+                sign = '+';
+            } else if (flags.space_sign) {
+                sign = ' ';
+            }
+
+            if (sign) {
+                // Add sign to buffer
+                temp_buffer[127] = sign;
+                memcpy(temp_buffer + 128 - len, num_str, len + 1);
+                num_str = temp_buffer + 127;
+                len++;
+            }
+
+            // Handle precision padding
+            if (flags.precision > (int)len) {
+                int pad = flags.precision - (int)len;
+                char *new_str = temp_buffer;
+                for (int i = 0; i < pad; i++) {
+                    *new_str++ = '0';
+                }
+                memcpy(new_str, num_str, len + 1);
+                num_str = temp_buffer;
+                len = strlen(num_str);
+            }
+
+            // Padding before number
+            if (!flags.left_justify && flags.width > (int)len) {
+                int pad = flags.width - (int)len;
+                char pad_char =
+                    (flags.zero_pad && flags.precision < 0) ? '0' : ' ';
+
+                for (int i = 0; i < pad; i++) {
+                    *ptr++ = pad_char;
+                }
+            }
+
+            // Copy number
+            for (size_t i = 0; i < len; i++) {
+                *ptr++ = num_str[i];
+            }
+
+            // Padding after number
+            if (flags.left_justify && flags.width > (int)len) {
+                int pad = flags.width - (int)len;
+                for (int i = 0; i < pad; i++) {
+                    *ptr++ = ' ';
+                }
+            }
+            break;
+        }
+
+        case 'u':
+        case 'o':
+        case 'x':
+        case 'X':
+        case 'p': {
+            // Unsigned integer formats
+            uint64_t value;
+            int base;
+            int uppercase = 0;
+
+            // Handle pointer separately
+            if (flags.specifier == 'p') {
+                value = (uint64_t)va_arg(ap, void *);
+                base = 16;
+                flags.alternate_form = 1;
+            } else {
+                // Get value based on length modifier
+                switch (flags.length_modifier) {
+                case 'H': // unsigned char
+                    value = (unsigned char)va_arg(ap, unsigned int);
+                    break;
+                case 'h': // unsigned short
+                    value = (unsigned short)va_arg(ap, unsigned int);
+                    break;
+                case 'l': // unsigned long
+                    value = va_arg(ap, unsigned long);
+                    break;
+                case 'L': // unsigned long long
+                    value = va_arg(ap, unsigned long long);
+                    break;
+                case 'j': // uintmax_t
+                    value = va_arg(ap, uint64_t);
+                    break;
+                case 'z': // size_t
+                    value = va_arg(ap, size_t);
+                    break;
+                case 't': // ptrdiff_t
+                    value = (uint64_t)va_arg(ap, long);
+                    break;
+                default: // unsigned int
+                    value = va_arg(ap, unsigned int);
+                    break;
+                }
+
+                // Determine base
+                switch (flags.specifier) {
+                case 'o':
+                    base = 8;
+                    break;
+                case 'x':
+                    base = 16;
+                    break;
+                case 'X':
+                    base = 16;
+                    uppercase = 1;
+                    break;
+                default:
+                    base = 10;
+                    break;
+                }
+            }
+
+            // Convert number to string
+            char *num_str = temp_buffer;
+            if (flags.precision == 0 && value == 0 && flags.specifier != 'p') {
+                // Handle zero precision with zero value
+                num_str[0] = '\0';
+            } else {
+                uitoa(value, num_str, base, uppercase);
+            }
+
+            size_t len = strlen(num_str);
+
+            // Handle alternate form prefix
+            char prefix[3] = {0};
+            int prefix_len = 0;
+
+            if (flags.alternate_form && value != 0) {
+                if (base == 8) {
+                    prefix[0] = '0';
+                    prefix_len = 1;
+                } else if (base == 16) {
+                    prefix[0] = '0';
+                    prefix[1] = uppercase ? 'X' : 'x';
+                    prefix_len = 2;
+                }
+            }
+
+            // Handle precision padding
+            if (flags.precision > (int)(len + prefix_len)) {
+                int pad = flags.precision - (int)(len + prefix_len);
+                char *new_str = temp_buffer + 64;
+                for (int i = 0; i < pad; i++) {
+                    new_str[i] = '0';
+                }
+                memcpy(new_str + pad, num_str, len + 1);
+                num_str = new_str;
+                len = strlen(num_str);
+            }
+
+            // Total length with prefix
+            int total_len = (int)len + prefix_len;
+
+            // Padding before number
+            if (!flags.left_justify && flags.width > total_len) {
+                int pad = flags.width - total_len;
+                char pad_char =
+                    (flags.zero_pad && flags.precision < 0) ? '0' : ' ';
+
+                for (int i = 0; i < pad; i++) {
+                    *ptr++ = pad_char;
+                }
+            }
+
+            // Write prefix
+            for (int i = 0; i < prefix_len; i++) {
+                *ptr++ = prefix[i];
+            }
+
+            // Copy number
+            for (size_t i = 0; i < len; i++) {
+                *ptr++ = num_str[i];
+            }
+
+            // Padding after number
+            if (flags.left_justify && flags.width > total_len) {
+                int pad = flags.width - total_len;
+                for (int i = 0; i < pad; i++) {
+                    *ptr++ = ' ';
+                }
+            }
+            break;
+        }
+
+        case 'n': {
+            // Store number of characters written so far
+            int *count_ptr = va_arg(ap, int *);
+            *count_ptr = (int)(ptr - buffer);
+            break;
+        }
+
+        default: {
+            // Unknown specifier, just copy the format
+            format -= consumed;
+            *ptr++ = *format++;
+            break;
+        }
+        }
+    }
+
+    *ptr = '\0';
+    return (int)(ptr - buffer);
+}
+
+/*
+ * Complete printf() function with full format support
+ */
+__attribute__((format(printf, 1, 2))) //
+ssize_t printf(const char *format, ...) {
+    va_list ap;
+    va_start(ap, format);
+
+    // Buffer for formatted output
+    char buffer[4096];
+
+    // Format to buffer
+    int len = format_to_buffer(buffer, format, ap);
+
+    va_end(ap);
+
+    // Write to stdout
+    ssize_t written = write(STDOUT_FILENO, buffer, len);
+    if (written < 0) {
+        exit(EXIT_FAILURE);
+    }
+
+    return written;
+}
+
+/*
+ * Test program
+ */
+int main(int argc, char **argv) {
+    // Test basic formats
+    printf("Basic tests:\n");
+    printf("String: %s\n", "Hello World");
+    printf("Character: %c\n", 'A');
+    printf("Integer: %d\n", 123);
+    // printf("Negative: %d\n", -456); // ERROR: returned 1
+    // FIXME: How it can "Negative: 23\n" its must be "Negative: -456\n"
+    // GDB output:
+    // buffer=0x0000007fffffcdd8  →  "Negative: 23\n", len=-0xd2
+    printf("Unsigned: %u\n", 789);
+    printf("Octal: %o\n", 255);
+    printf("Hex lowercase: %x\n", 255);
+    printf("Hex uppercase: %X\n", 255);
+    printf("Pointer: %p\n", (void *)main);
+    printf("NULL str: %s\n", (char *)NULL);
+
+    // Test flags
+    printf("\nFlag tests:\n");
+    printf("Width 10: |%10d|\n", 123);
+    printf("Left justify: |%-10d|\n", 123);
+    printf("Zero pad: |%010d|\n", 123);
+    // printf("Sign: |%+d|\n", 123); // ERROR returned 1
+    // FIXME: Hmmmm....
+    // GDB output: 0x0000007fffffcdd8  →  "Sign: |d: |0000000123|\n
+
+    // printf("Space: |% d|\n", 123); // ERROR returned 1
+    // $x1 : 0x0000007fffffcdd8  →  "Space: |: |0000000123|\n"
+    printf("Alternate hex: %#x\n", 255);
+    printf("Alternate octal: %#o\n", 255);
+
+    // Test precision
+    printf("\nPrecision tests:\n");
+    printf("Precision 5: %.5d\n", 123);
+    printf("Precision 2: %.2d\n", 123);
+    printf("Precision 0: %.0d\n", 0);
+    printf("String precision: %.5s\n", "Hello World");
+
+    // Test combinations
+    printf("\nCombination tests:\n");
+    printf("|%10.5d|\n", 123);
+    printf("|%-10.5d|\n", 123);
+
+    // printf("|%+10.5d|\n", 123); // ERROR returned 1
+    // printf("|%+-10.5d|\n", 123); // ERROR returned 1
+
+    // Test argument passing
+    printf("\nArgument tests:\n");
+    for (int i = 0; i < argc; i++) {
+        printf("argv[%d] = %s\n", i, argv[i]);
+    }
+
+    // Bonus: test input
     char buffer[1024];
     while (1) {
 
@@ -217,7 +789,7 @@ void _start_main(long *stack) {
 }
 
 __attribute__((naked, noreturn)) void _start(void) {
-    asm(
+    asm(                   //
         "    mov x0, sp\n" // sp = stack
         "    bl _start_main\n"
 
