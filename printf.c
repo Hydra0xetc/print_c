@@ -149,7 +149,7 @@ void *memcpy(void *dest, const void *src, size_t n) {
  */
 
 // Convert unsigned integer to string with given base (2-16)
-// Returns pointer to the end of the string
+// Return pointer to null terminator, not to buffer start
 static char *uitoa(uint64_t num, char *buffer, int base, int uppercase) {
     char digits_lower[] = "0123456789abcdef";
     char digits_upper[] = "0123456789ABCDEF";
@@ -180,18 +180,7 @@ static char *uitoa(uint64_t num, char *buffer, int base, int uppercase) {
     }
 
     *ptr = '\0';
-    return ptr;
-}
-
-// Convert signed integer to string
-static char *itoa(int64_t num, char *buffer, int base, int uppercase) {
-    if (num < 0 && base == 10) {
-        *buffer++ = '-';
-        num = -num;
-    }
-
-    uitoa((uint64_t)num, buffer, base, uppercase);
-    return buffer;
+    return ptr; // Return end pointer
 }
 
 // Flags for format specifiers
@@ -414,8 +403,9 @@ static int format_to_buffer(char *buffer, const char *format, va_list ap) {
 
         case 'd':
         case 'i': {
-            // Signed integer
+            // Properly handle signed integers
             int64_t value;
+            int is_negative = 0;
 
             // Get value based on length modifier
             switch (flags.length_modifier) {
@@ -445,20 +435,26 @@ static int format_to_buffer(char *buffer, const char *format, va_list ap) {
                 break;
             }
 
+            // Store if negative and convert to positive for uitoa
+            if (value < 0) {
+                is_negative = 1;
+                value = -value;
+            }
+
             char *num_str = temp_buffer;
             if (flags.precision == 0 && value == 0) {
                 // Handle zero precision with zero value
                 num_str[0] = '\0';
             } else {
                 // Convert number to string
-                itoa(value, num_str, 10, 0);
+                uitoa((uint64_t)value, num_str, 10, 0);
             }
 
             size_t len = strlen(num_str);
 
-            // Handle sign
+            // Determine sign character properly
             char sign = 0;
-            if (value < 0) {
+            if (is_negative) {
                 sign = '-';
             } else if (flags.always_sign) {
                 sign = '+';
@@ -466,31 +462,50 @@ static int format_to_buffer(char *buffer, const char *format, va_list ap) {
                 sign = ' ';
             }
 
+            // Create final number string with sign
+            char final_buffer[128];
+            char *final_str = final_buffer;
+            size_t final_len = len;
+
             if (sign) {
-                // Add sign to buffer
-                temp_buffer[127] = sign;
-                memcpy(temp_buffer + 128 - len, num_str, len + 1);
-                num_str = temp_buffer + 127;
-                len++;
+                *final_str++ = sign;
+                final_len++;
             }
 
-            // Handle precision padding
+            memcpy(final_str, num_str, len + 1);
+            final_str = final_buffer;
+
+            // Handle precision padding (zeros after sign, before number)
             if (flags.precision > (int)len) {
                 int pad = flags.precision - (int)len;
-                char *new_str = temp_buffer;
-                for (int i = 0; i < pad; i++) {
-                    *new_str++ = '0';
+                char prec_buffer[128];
+                char *pb = prec_buffer;
+
+                if (sign) {
+                    *pb++ = sign;
                 }
-                memcpy(new_str, num_str, len + 1);
-                num_str = temp_buffer;
-                len = strlen(num_str);
+
+                for (int i = 0; i < pad; i++) {
+                    *pb++ = '0';
+                }
+
+                memcpy(pb, num_str, len + 1);
+                final_str = prec_buffer;
+                final_len = strlen(prec_buffer);
             }
 
-            // Padding before number
-            if (!flags.left_justify && flags.width > (int)len) {
-                int pad = flags.width - (int)len;
+            // Width padding
+            if (!flags.left_justify && flags.width > (int)final_len) {
+                int pad = flags.width - (int)final_len;
                 char pad_char =
                     (flags.zero_pad && flags.precision < 0) ? '0' : ' ';
+
+                // If zero padding with sign, print sign first
+                if (pad_char == '0' && sign) {
+                    *ptr++ = sign;
+                    final_str++; // Skip sign in final_str
+                    final_len--;
+                }
 
                 for (int i = 0; i < pad; i++) {
                     *ptr++ = pad_char;
@@ -498,13 +513,13 @@ static int format_to_buffer(char *buffer, const char *format, va_list ap) {
             }
 
             // Copy number
-            for (size_t i = 0; i < len; i++) {
-                *ptr++ = num_str[i];
+            for (size_t i = 0; i < final_len; i++) {
+                *ptr++ = final_str[i];
             }
 
             // Padding after number
-            if (flags.left_justify && flags.width > (int)len) {
-                int pad = flags.width - (int)len;
+            if (flags.left_justify && flags.width > (int)final_len) {
+                int pad = flags.width - (int)final_len;
                 for (int i = 0; i < pad; i++) {
                     *ptr++ = ' ';
                 }
@@ -700,10 +715,7 @@ int main(int argc, char **argv) {
     printf("String: %s\n", "Hello World");
     printf("Character: %c\n", 'A');
     printf("Integer: %d\n", 123);
-    // printf("Negative: %d\n", -456); // ERROR: returned 1
-    // FIXME: How it can "Negative: 23\n" its must be "Negative: -456\n"
-    // GDB output:
-    // buffer=0x0000007fffffcdd8  →  "Negative: 23\n", len=-0xd2
+    printf("Negative: %d\n", -456); // FIXED!
     printf("Unsigned: %u\n", 789);
     printf("Octal: %o\n", 255);
     printf("Hex lowercase: %x\n", 255);
@@ -716,12 +728,8 @@ int main(int argc, char **argv) {
     printf("Width 10: |%10d|\n", 123);
     printf("Left justify: |%-10d|\n", 123);
     printf("Zero pad: |%010d|\n", 123);
-    // printf("Sign: |%+d|\n", 123); // ERROR returned 1
-    // FIXME: Hmmmm....
-    // GDB output: 0x0000007fffffcdd8  →  "Sign: |d: |0000000123|\n
-
-    // printf("Space: |% d|\n", 123); // ERROR returned 1
-    // $x1 : 0x0000007fffffcdd8  →  "Space: |: |0000000123|\n"
+    printf("Sign: |%+d|\n", 123);  // FIXED!
+    printf("Space: |% d|\n", 123); // FIXED!
     printf("Alternate hex: %#x\n", 255);
     printf("Alternate octal: %#o\n", 255);
 
@@ -736,9 +744,8 @@ int main(int argc, char **argv) {
     printf("\nCombination tests:\n");
     printf("|%10.5d|\n", 123);
     printf("|%-10.5d|\n", 123);
-
-    // printf("|%+10.5d|\n", 123); // ERROR returned 1
-    // printf("|%+-10.5d|\n", 123); // ERROR returned 1
+    printf("|%+10.5d|\n", 123);  // FIXED!
+    printf("|%+-10.5d|\n", 123); // FIXED!
 
     // Test argument passing
     printf("\nArgument tests:\n");
