@@ -18,6 +18,9 @@ run: build
 args: build
 	@./$(OUT) $(filter-out $@,$(MAKECMDGOALS))
 
+%:
+	@:
+
 clean:
 	@echo "Cleaning..."
 	rm -f $(OUT)
