@@ -15,6 +15,9 @@ $(OUT): $(SRC)
 run: build
 	@./$(OUT)
 
+args: build
+	@./$(OUT) $(filter-out $@,$(MAKECMDGOALS))
+
 clean:
 	@echo "Cleaning..."
 	rm -f $(OUT)
