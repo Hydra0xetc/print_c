@@ -5,7 +5,7 @@ SRC      = write.asm
 OBJ      = bin/out.o
 OUT      = bin/out
 
-.PHONY = all build clean
+.PHONY: all build clean
 
 all: build
 
