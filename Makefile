@@ -3,7 +3,7 @@ SRC   = printf.c
 FLAGS = -Wall -Wextra -ggdb -nostdlib -ffreestanding
 OUT   = bin/out
 
-.PHONY = all build clean
+.PHONY: all build clean
 
 all: build
 
