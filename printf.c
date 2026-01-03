@@ -21,6 +21,7 @@ typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 typedef unsigned long uint64_t;
 typedef long int64_t;
+typedef double double_t;
 
 // Define va_list
 typedef __builtin_va_list va_list;
@@ -50,6 +51,12 @@ typedef __builtin_va_list va_list;
 #define EXIT_SUCCESS 0
 
 #define NULL ((void *)0)
+
+// Math constants for floating point
+#define DBL_MAX  1.7976931348623157e+308
+#define DBL_MIN  2.2250738585072014e-308
+#define INFINITY (1.0 / 0.0)
+#define NAN      (0.0 / 0.0)
 
 /*
  * System call convention for ARM64:
@@ -145,6 +152,35 @@ void *memcpy(void *dest, const void *src, size_t n) {
 }
 
 /*
+ * Custom memset() implementation
+ * Sets n bytes to value c
+ */
+void *memset(void *s, int c, size_t n) {
+    unsigned char *p = (unsigned char *)s;
+    for (size_t i = 0; i < n; i++) {
+        p[i] = (unsigned char)c;
+    }
+    return s;
+}
+
+// Helper functions for floating point
+static inline int isinf(double x) {
+    uint64_t bits;
+    memcpy(&bits, &x, sizeof(double));
+    // Check if exponent is all 1s and mantissa is 0
+    return ((bits & 0x7FF0000000000000) == 0x7FF0000000000000) &&
+           ((bits & 0x000FFFFFFFFFFFFF) == 0);
+}
+
+static inline int isnan(double x) {
+    uint64_t bits;
+    memcpy(&bits, &x, sizeof(double));
+    // Check if exponent is all 1s and mantissa is non-zero
+    return ((bits & 0x7FF0000000000000) == 0x7FF0000000000000) &&
+           ((bits & 0x000FFFFFFFFFFFFF) != 0);
+}
+
+/*
  * Number conversion functions
  */
 
@@ -183,6 +219,267 @@ static char *uitoa(uint64_t num, char *buffer, int base, int uppercase) {
     return ptr; // Return end pointer
 }
 
+// Convert double to string with fixed notation
+// Returns pointer to null terminator
+static char *ftoa(double value,
+                  char *buffer,
+                  int precision,
+                  int uppercase,
+                  int alternate_form) {
+
+    char *ptr = buffer;
+
+    // Handle special cases
+    if (isnan(value)) {
+        const char *nan_str = uppercase ? "NAN" : "nan";
+        while (*nan_str) {
+            *ptr++ = *nan_str++;
+        }
+        *ptr = '\0';
+        return ptr;
+    }
+
+    if (isinf(value)) {
+        const char *inf_str = uppercase ? "INF" : "inf";
+        if (value < 0) {
+            *ptr++ = '-';
+        }
+        while (*inf_str) {
+            *ptr++ = *inf_str++;
+        }
+        *ptr = '\0';
+        return ptr;
+    }
+
+    // Handle sign
+    if (value < 0) {
+        *ptr++ = '-';
+        value = -value;
+    }
+
+    // Default precision is 6 if not specified
+    if (precision < 0) {
+        precision = 6;
+    }
+
+    // Round the number based on precision
+    double rounder = 0.5;
+    for (int i = 0; i < precision; i++) {
+        rounder *= 0.1;
+    }
+    value += rounder;
+
+    // Extract integer part
+    uint64_t int_part = (uint64_t)value;
+    double fractional = value - int_part;
+
+    // Convert integer part
+    char *int_end = uitoa(int_part, ptr, 10, 0);
+    ptr = int_end;
+
+    // Add decimal point if precision > 0 or alternate form is set
+    if (precision > 0 || alternate_form) {
+        *ptr++ = '.';
+
+        // Convert fractional part
+        for (int i = 0; i < precision; i++) {
+            fractional *= 10.0;
+            int digit = (int)fractional;
+            *ptr++ = '0' + digit;
+            fractional -= digit;
+        }
+    }
+
+    *ptr = '\0';
+    return ptr;
+}
+
+// Convert double to string with scientific notation
+static char *etoa(double value, char *buffer, int precision, int uppercase) {
+    char *ptr = buffer;
+
+    // Handle special cases
+    if (isnan(value)) {
+        const char *nan_str = uppercase ? "NAN" : "nan";
+        while (*nan_str) {
+            *ptr++ = *nan_str++;
+        }
+        *ptr = '\0';
+        return ptr;
+    }
+
+    if (isinf(value)) {
+        const char *inf_str = uppercase ? "INF" : "inf";
+        if (value < 0) {
+            *ptr++ = '-';
+        }
+        while (*inf_str) {
+            *ptr++ = *inf_str++;
+        }
+        *ptr = '\0';
+        return ptr;
+    }
+
+    // Handle sign
+    if (value < 0) {
+        *ptr++ = '-';
+        value = -value;
+    }
+
+    // Default precision is 6 if not specified
+    if (precision < 0) {
+        precision = 6;
+    }
+
+    // Handle zero
+    if (value == 0.0) {
+        *ptr++ = '0';
+        if (precision > 0) {
+            *ptr++ = '.';
+            for (int i = 0; i < precision; i++) {
+                *ptr++ = '0';
+            }
+        }
+        *ptr++ = uppercase ? 'E' : 'e';
+        *ptr++ = '+';
+        *ptr++ = '0';
+        *ptr++ = '0';
+        *ptr = '\0';
+        return ptr;
+    }
+
+    // Calculate exponent
+    int exponent = 0;
+    while (value >= 10.0) {
+        value /= 10.0;
+        exponent++;
+    }
+    while (value < 1.0 && value > 0.0) {
+        value *= 10.0;
+        exponent--;
+    }
+
+    // Round the number based on precision
+    double rounder = 0.5;
+    for (int i = 0; i < precision; i++) {
+        rounder *= 0.1;
+    }
+    value += rounder;
+
+    // Check if rounding caused value to reach 10.0
+    if (value >= 10.0) {
+        value /= 10.0;
+        exponent++;
+    }
+
+    // Convert mantissa
+    uint64_t int_part = (uint64_t)value;
+    double fractional = value - int_part;
+
+    char *int_end = uitoa(int_part, ptr, 10, 0);
+    ptr = int_end;
+
+    // Add decimal point if precision > 0
+    if (precision > 0) {
+        *ptr++ = '.';
+
+        // Convert fractional part
+        for (int i = 0; i < precision; i++) {
+            fractional *= 10.0;
+            int digit = (int)fractional;
+            *ptr++ = '0' + digit;
+            fractional -= digit;
+        }
+    }
+
+    // Add exponent
+    *ptr++ = uppercase ? 'E' : 'e';
+
+    if (exponent >= 0) {
+        *ptr++ = '+';
+    } else {
+        *ptr++ = '-';
+        exponent = -exponent;
+    }
+
+    // Convert exponent (always 2 digits minimum)
+    if (exponent < 10) {
+        *ptr++ = '0';
+        *ptr++ = '0' + exponent;
+    } else {
+        char exp_buf[4];
+        char *exp_end = uitoa(exponent, exp_buf, 10, 0);
+        char *exp_ptr = exp_buf;
+        while (exp_ptr < exp_end) {
+            *ptr++ = *exp_ptr++;
+        }
+    }
+
+    *ptr = '\0';
+    return ptr;
+}
+
+// Convert double to string with g/G format
+static char *gtoa(double value, char *buffer, int precision, int uppercase) {
+
+    // Handle special cases
+    if (isnan(value) || isinf(value)) {
+        return etoa(value, buffer, precision, uppercase);
+    }
+
+    // Default precision is 6 if not specified
+    if (precision < 0) {
+        precision = 6;
+    }
+
+    // Calculate exponent for scientific notation
+    int exponent = 0;
+    double abs_value = value < 0 ? -value : value;
+
+    if (abs_value != 0.0) {
+        while (abs_value >= 10.0) {
+            abs_value /= 10.0;
+            exponent++;
+        }
+        while (abs_value < 1.0) {
+            abs_value *= 10.0;
+            exponent--;
+        }
+    }
+
+    // Choose between f and e format
+    if (exponent < -4 || exponent >= precision) {
+        // Use scientific notation
+        // Adjust precision: total digits = precision
+        if (precision > 0) {
+            precision--;
+        }
+        return etoa(value, buffer, precision, uppercase);
+    } else {
+        // Use fixed notation
+        // Adjust precision: decimal digits = precision - 1 - exponent
+        int decimal_digits = precision - 1 - exponent;
+        if (decimal_digits < 0) {
+            decimal_digits = 0;
+        }
+        return ftoa(value, buffer, decimal_digits, uppercase, 0);
+    }
+}
+
+double __trunctfdf2(long double x) {
+    // On ARM64 long double is typically same as double
+    // Just reinterpret the bits
+    // see:
+    // https://developer.android.com/ndk/guides/abis?utm_source=chatgpt.com&hl=id/
+    union {
+        long double ld;
+        double d;
+    } u;
+
+    u.ld = x;
+    return x;
+}
+
 // Flags for format specifiers
 typedef struct {
     int left_justify;    // '-'
@@ -192,8 +489,8 @@ typedef struct {
     int alternate_form;  // '#'
     int width;           // field width
     int precision;       // precision (-1 means unspecified)
-    int length_modifier; // h, hh, l, ll, z, t, j
-    char specifier;      // d, i, u, o, x, X, f, e, g, c, s, p, n, %
+    int length_modifier; // h, hh, l, ll, z, t, j, L
+    char specifier;      // d, i, u, o, x, X, f, F, e, E, g, G, c, s, p, n, %
 } format_flags;
 
 /*
@@ -303,7 +600,8 @@ parse_width:
         format++;
         break;
     case 'L':
-        flags->length_modifier = 'L';
+        flags->length_modifier =
+            'B'; // Capital L for long double (we'll use double)
         format++;
         break;
     }
@@ -320,7 +618,7 @@ parse_width:
  */
 static int format_to_buffer(char *buffer, const char *format, va_list ap) {
     char *ptr = buffer;
-    char temp_buffer[128]; // Temporary buffer for number conversions
+    char temp_buffer[256]; // Larger buffer for floating point
 
     while (*format) {
         if (*format != '%') {
@@ -661,6 +959,221 @@ static int format_to_buffer(char *buffer, const char *format, va_list ap) {
             break;
         }
 
+        case 'f':
+        case 'F': {
+            // Floating point fixed notation
+            double value = va_arg(ap, double);
+
+            // Convert to string
+            char *num_str = temp_buffer;
+            ftoa(value,
+                 num_str,
+                 flags.precision,
+                 (flags.specifier == 'F'),
+                 flags.alternate_form);
+
+            size_t len = strlen(num_str);
+
+            // Handle sign for positive numbers
+            char sign = 0;
+            int skip_first = 0;
+
+            // Check if the string already has a sign
+            if (num_str[0] == '-') {
+                sign = '-';
+                skip_first = 1; // Skip the minus that's already in string
+            } else if (num_str[0] == '+') {
+                sign = '+';
+                skip_first = 1;
+            } else {
+                // Add sign if needed for positive numbers
+                if (flags.always_sign) {
+                    sign = '+';
+                } else if (flags.space_sign) {
+                    sign = ' ';
+                }
+            }
+
+            // Calculate effective length (without the sign we'll handle
+            // separately)
+            size_t effective_len = skip_first ? len - 1 : len;
+            int total_len = (int)effective_len + (sign ? 1 : 0);
+
+            // Padding before number
+            if (!flags.left_justify && flags.width > total_len) {
+                int pad = flags.width - total_len;
+                char pad_char = (flags.zero_pad) ? '0' : ' ';
+
+                // Special handling for zero padding with sign
+                if (pad_char == '0' && sign) {
+                    *ptr++ = sign;
+                    sign = 0; // Sign already printed
+                }
+
+                for (int i = 0; i < pad; i++) {
+                    *ptr++ = pad_char;
+                }
+            }
+
+            // Add sign if not already printed
+            if (sign) {
+                *ptr++ = sign;
+            }
+
+            // Copy number (skip sign if already in string)
+            const char *copy_start = skip_first ? num_str + 1 : num_str;
+            size_t copy_len = skip_first ? len - 1 : len;
+
+            for (size_t i = 0; i < copy_len; i++) {
+                *ptr++ = copy_start[i];
+            }
+
+            // Padding after number
+            if (flags.left_justify && flags.width > total_len) {
+                int pad = flags.width - total_len;
+                for (int i = 0; i < pad; i++) {
+                    *ptr++ = ' ';
+                }
+            }
+            break;
+        }
+
+        case 'e':
+        case 'E': {
+            // Floating point scientific notation
+            double value = va_arg(ap, double);
+
+            // Convert to string
+            char *num_str = temp_buffer;
+            etoa(value, num_str, flags.precision, (flags.specifier == 'E'));
+
+            size_t len = strlen(num_str);
+
+            // Handle sign for positive numbers
+            char sign = 0;
+            int skip_first = 0;
+
+            // Check if the string already has a sign
+            if (num_str[0] == '-') {
+                sign = '-';
+                skip_first = 1;
+            } else if (num_str[0] == '+') {
+                sign = '+';
+                skip_first = 1;
+            } else {
+                if (flags.always_sign) {
+                    sign = '+';
+                } else if (flags.space_sign) {
+                    sign = ' ';
+                }
+            }
+
+            size_t effective_len = skip_first ? len - 1 : len;
+            int total_len = (int)effective_len + (sign ? 1 : 0);
+
+            // Padding before number
+            if (!flags.left_justify && flags.width > total_len) {
+                int pad = flags.width - total_len;
+                char pad_char = (flags.zero_pad) ? '0' : ' ';
+
+                if (pad_char == '0' && sign) {
+                    *ptr++ = sign;
+                    sign = 0;
+                }
+
+                for (int i = 0; i < pad; i++) {
+                    *ptr++ = pad_char;
+                }
+            }
+
+            if (sign) {
+                *ptr++ = sign;
+            }
+
+            const char *copy_start = skip_first ? num_str + 1 : num_str;
+            size_t copy_len = skip_first ? len - 1 : len;
+
+            for (size_t i = 0; i < copy_len; i++) {
+                *ptr++ = copy_start[i];
+            }
+
+            if (flags.left_justify && flags.width > total_len) {
+                int pad = flags.width - total_len;
+                for (int i = 0; i < pad; i++) {
+                    *ptr++ = ' ';
+                }
+            }
+            break;
+        }
+
+        case 'g':
+        case 'G': {
+            // Floating point general notation
+            double value = va_arg(ap, double);
+
+            // Convert to string
+            char *num_str = temp_buffer;
+            gtoa(value, num_str, flags.precision, (flags.specifier == 'G'));
+
+            size_t len = strlen(num_str);
+
+            // Handle sign for positive numbers
+            char sign = 0;
+            int skip_first = 0;
+
+            // Check if the string already has a sign
+            if (num_str[0] == '-') {
+                sign = '-';
+                skip_first = 1;
+            } else if (num_str[0] == '+') {
+                sign = '+';
+                skip_first = 1;
+            } else {
+                if (flags.always_sign) {
+                    sign = '+';
+                } else if (flags.space_sign) {
+                    sign = ' ';
+                }
+            }
+
+            size_t effective_len = skip_first ? len - 1 : len;
+            int total_len = (int)effective_len + (sign ? 1 : 0);
+
+            // Padding before number
+            if (!flags.left_justify && flags.width > total_len) {
+                int pad = flags.width - total_len;
+                char pad_char = (flags.zero_pad) ? '0' : ' ';
+
+                if (pad_char == '0' && sign) {
+                    *ptr++ = sign;
+                    sign = 0;
+                }
+
+                for (int i = 0; i < pad; i++) {
+                    *ptr++ = pad_char;
+                }
+            }
+
+            if (sign) {
+                *ptr++ = sign;
+            }
+
+            const char *copy_start = skip_first ? num_str + 1 : num_str;
+            size_t copy_len = skip_first ? len - 1 : len;
+
+            for (size_t i = 0; i < copy_len; i++) {
+                *ptr++ = copy_start[i];
+            }
+
+            if (flags.left_justify && flags.width > total_len) {
+                int pad = flags.width - total_len;
+                for (int i = 0; i < pad; i++) {
+                    *ptr++ = ' ';
+                }
+            }
+            break;
+        }
+
         case 'n': {
             // Store number of characters written so far
             int *count_ptr = va_arg(ap, int *);
@@ -707,7 +1220,7 @@ ssize_t printf(const char *format, ...) {
 }
 
 /*
- * Test program
+ * Test program with floating point
  */
 int main(int argc, char **argv) {
     // Test basic formats
@@ -715,7 +1228,7 @@ int main(int argc, char **argv) {
     printf("String: %s\n", "Hello World");
     printf("Character: %c\n", 'A');
     printf("Integer: %d\n", 123);
-    printf("Negative: %d\n", -456); // FIXED!
+    printf("Negative: %d\n", -456);
     printf("Unsigned: %u\n", 789);
     printf("Octal: %o\n", 255);
     printf("Hex lowercase: %x\n", 255);
@@ -728,8 +1241,8 @@ int main(int argc, char **argv) {
     printf("Width 10: |%10d|\n", 123);
     printf("Left justify: |%-10d|\n", 123);
     printf("Zero pad: |%010d|\n", 123);
-    printf("Sign: |%+d|\n", 123);  // FIXED!
-    printf("Space: |% d|\n", 123); // FIXED!
+    printf("Sign: |%+d|\n", 123);
+    printf("Space: |% d|\n", 123);
     printf("Alternate hex: %#x\n", 255);
     printf("Alternate octal: %#o\n", 255);
 
@@ -744,8 +1257,63 @@ int main(int argc, char **argv) {
     printf("\nCombination tests:\n");
     printf("|%10.5d|\n", 123);
     printf("|%-10.5d|\n", 123);
-    printf("|%+10.5d|\n", 123);  // FIXED!
-    printf("|%+-10.5d|\n", 123); // FIXED!
+    printf("|%+10.5d|\n", 123);
+    printf("|%+-10.5d|\n", 123);
+
+    // Test floating point formats
+    printf("\nFloating point tests:\n");
+
+    // Basic f format
+    printf("Fixed (default): %f\n", 123.456789);
+    printf("Fixed (precision 2): %.2f\n", 123.456789);
+    printf("Fixed (precision 0): %.0f\n", 123.456789);
+    printf("Fixed (width 10): |%10f|\n", 123.456789);
+    printf("Fixed (width 10, precision 2): |%10.2f|\n", 123.456789);
+    printf("Fixed (negative): %f\n", -123.456789);
+    printf("Fixed (zero): %f\n", 0.0);
+    printf("Fixed (small): %f\n", 0.000123456);
+    printf("Fixed (large): %f\n", 123456789.0);
+
+    // Scientific notation
+    printf("\nScientific notation:\n");
+    printf("Scientific (default): %e\n", 123.456789);
+    printf("Scientific (precision 2): %.2e\n", 123.456789);
+    printf("Scientific (uppercase): %E\n", 123.456789);
+    printf("Scientific (negative): %e\n", -123.456789);
+    printf("Scientific (small): %e\n", 0.000123456);
+    printf("Scientific (large): %e\n", 123456789.0);
+
+    // General format
+    printf("\nGeneral format:\n");
+    printf("General (default): %g\n", 123.456789);
+    printf("General (precision 4): %.4g\n", 123.456789);
+    printf("General (uppercase): %G\n", 123.456789);
+    printf("General (small): %g\n", 0.000123456);
+    printf("General (very small): %g\n", 0.000000123456);
+    printf("General (large): %g\n", 123456789.0);
+    printf("General (very large): %g\n", 123456789012345.0);
+
+    // Special floating point values
+    printf("\nSpecial values:\n");
+    double inf = 1.0 / 0.0;
+    double nan = 0.0 / 0.0;
+    printf("Infinity: %f\n", inf);
+    printf("Negative infinity: %f\n", -inf);
+    printf("NaN: %f\n", nan);
+    printf("Infinity (scientific): %e\n", inf);
+    printf("NaN (uppercase): %F\n", nan);
+
+    // Test alternate form
+    printf("\nAlternate form:\n");
+    printf("Alternate (f): %#.0f\n", 123.0);
+    printf("Alternate (g): %#g\n", 123.0);
+    printf("Alternate (g with decimal): %#g\n", 123.456);
+
+    // Test with signs
+    printf("\nSign tests for floats:\n");
+    printf("Always sign: %+f\n", 123.456);
+    printf("Space sign: % f\n", 123.456);
+    printf("Always sign (negative): %+f\n", -123.456);
 
     // Test argument passing
     printf("\nArgument tests:\n");
