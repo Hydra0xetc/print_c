@@ -470,7 +470,7 @@ double __trunctfdf2(long double x) {
     // On ARM64 long double is typically same as double
     // Just reinterpret the bits
     // see:
-    // https://developer.android.com/ndk/guides/abis?utm_source=chatgpt.com&hl=id/
+    // https://developer.android.com/ndk/guides/abis?hl=id
     union {
         long double ld;
         double d;
